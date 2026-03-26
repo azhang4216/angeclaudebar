@@ -50,13 +50,13 @@ sudo apt install jq
 
 ```bash
 curl -o ~/.claude/statusline.sh \
-  https://raw.githubusercontent.com/yourusername/claude-statusline/main/statusline.sh
+  https://raw.githubusercontent.com/azhang4216/claude-statusline/main/statusline.sh
 chmod +x ~/.claude/statusline.sh
 ```
 
 Or clone and symlink:
 ```bash
-git clone https://github.com/yourusername/claude-statusline.git ~/repos/claude-statusline
+git clone https://github.com/azhang4216/claude-statusline.git ~/repos/claude-statusline
 ln -s ~/repos/claude-statusline/statusline.sh ~/.claude/statusline.sh
 ```
 
