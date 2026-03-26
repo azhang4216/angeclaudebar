@@ -6,6 +6,18 @@ A rich, plan-aware status line for [Claude Code](https://claude.ai/code) with Ca
 
 ## Install
 
+### Option 1: Let Claude Code do it
+
+Copy the URL below and paste it into a new Claude Code session with this prompt:
+
+```
+Install AngeClaudeBar from https://github.com/azhang4216/angeclaudebar — download the statusline.sh script, configure settings.json, and add the SessionStart hook to keep login info fresh.
+```
+
+Claude Code will handle the download, settings update, and hook configuration for you.
+
+### Option 2: Manual setup
+
 **1. Download the script**
 
 > **Note:** If you already have a `~/.claude/statusline.sh`, back it up first — this command will overwrite it.
