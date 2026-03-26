@@ -395,10 +395,19 @@ sep=" ${C_OVERLAY}|${R} "
 # Width-adaptive layout: detect terminal width, pick best tier
 # =====================================================================
 
-# stdin is JSON, so tput/stty need /dev/tty to reach the real terminal
-term_cols=$(tput cols < /dev/tty 2>/dev/null || stty size < /dev/tty 2>/dev/null | awk '{print $2}' || echo 80)
+# stty size gives the real terminal dimensions (tput uses the pty width, which
+# Claude Code sets to 80 for subprocesses — not the actual terminal width).
+# STATUSLINE_COLS can override width (useful for demos/testing).
+if [ -n "${STATUSLINE_COLS:-}" ] && [ "${STATUSLINE_COLS:-0}" -gt 0 ] 2>/dev/null; then
+  term_cols=$STATUSLINE_COLS
+else
+  term_cols=$(stty size < /dev/tty 2>/dev/null | awk '{print $2}')
+  [ "${term_cols:-0}" -le 0 ] 2>/dev/null && term_cols=$(tput cols < /dev/tty 2>/dev/null)
+  [ "${term_cols:-0}" -le 0 ] 2>/dev/null && term_cols=80
+fi
 # Right-side Claude Code chrome (effort, tokens, version) shares the first line.
-avail=$((term_cols - 35))
+# Use 45 chars margin to account for variable-length right-side indicators.
+avail=$((term_cols - 45))
 
 # Color-coded percentage (no gauge bar). Args: pct, mode
 cpct() {
@@ -457,114 +466,85 @@ if [ -n "$_email_short" ] || [ -n "$account_plan" ]; then
   fi
 fi
 
-# --- Build single-line output based on available width ---
-# All tiers are single-line (multi-line is unreliable in Claude Code).
-# Content widths measured from actual visible characters:
-#   FULL:    project  branch [diffs] | model | gauge ctx% | c% | w%  (~87 chars)
-#   WIDE:    project  branch | model | ctx% | c% | w%                (~64 chars)
-#   COMPACT: project  branch [diffs] | ctx% | c% | w%               (~52 chars)
-#   NARROW:  project  branch | ctx% | c% | w%                       (~40 chars)
-#   ULTRA:   branch ctx% c% w%                                      (~16 chars)
+# --- Build output (always single line) ---
+# Tiers drop content as space shrinks. Gauge bars drop before cost/usage.
+#   XWIDE  (content fits): full path + full model + ctx gauge + usage gauges
+#   WIDE   (avail >=  72): full path + model_short + ctx% + usage%
+#   MEDIUM (avail >=  52): project_name + model_short + ctx% + usage%
+#   COMPACT(avail >=  36): project_name + branch + ctx% + usage%
+#   NARROW (avail >=  20): project_short + branch + ctx%
+#   ULTRA                : branch + ctx%
 
-# Precompute widths for tier selection
-# WIDE uses short model name (Op 4.6 (1M))
-model_line_vis=$((${#project_name} + 2 + ${#git_branch} + 3 + ${#model_name} + 3 + 3 + 3 + 5 + 3 + 4))
-# FULL uses full path + full model name + gauge
-full_model_vis=$((${#project_dir_display} + 2 + ${#git_branch} + 3 + ${#model_full} + 3 + 10 + 1 + 4))
-full_line_vis=$full_model_vis
+# Precompute usage segments
+if $is_subscription_plan; then
+  usage_gauges="${sep}${C_MUTED}5h:${R} $(bgauge "$current_pct" 6 budget) $(cpct $current_pct budget)"
+  [ -n "$current_reset" ] && usage_gauges+=" ${C_MUTED}${current_reset}${R}"
+  usage_gauges+="${sep}${C_MUTED}7d:${R} $(bgauge "$weekly_pct" 6 budget) $(cpct $weekly_pct budget)"
+  [ -n "$weekly_reset" ] && usage_gauges+=" ${C_MUTED}${weekly_reset}${R}"
+  [ "$extra_enabled" = "true" ] && usage_gauges+="${sep}${C_MUTED}extra:${R} $(bgauge "$extra_pct" 6 budget) ${C_MUTED}${extra_remaining} left${R}"
+  usage_pct="${sep}${C_MUTED}5h:${R} $(cpct $current_pct budget)${sep}${C_MUTED}7d:${R} $(cpct $weekly_pct budget)"
+  _xwide_usage_vis=35   # approx: " | 5h: [6] XX% HH:MM | 7d: [6] XX% DAY"
+else
+  usage_gauges="${sep}${C_AMBER}${session_cost_fmt}${R}"
+  usage_pct="${sep}${C_AMBER}${session_cost_fmt}${R}"
+  _xwide_usage_vis=$((3 + ${#session_cost_fmt}))
+fi
 
-if [ "$avail" -ge 88 ] && [ "$avail" -ge "$full_line_vis" ]; then
-  # FULL: line 1 = full dir path + branch + diffs + model + ctx gauge
-  #       line 2 = c gauge + reset | w gauge + reset | ext
-  line1="${C_RED}${project_dir_display}${R}"
-  [ -n "$git_branch" ] && line1+="  ${C_GREEN}${git_branch}${R}"
-  [ -n "$diff_str" ] && line1+=" ${C_AMBER}[${diff_str}]${R}"
-  line1+="${sep}${C_PURPLE}${model_full}${R}"
-  line1+="${sep}${C_MUTED}ctx:${R} $(bgauge "$ctx_pct" 8 context) $(cpct $ctx_pct context)"
-  if $is_subscription_plan; then
-    line2="${C_MUTED}5h:${R} $(bgauge "$current_pct" 6 budget) $(cpct $current_pct budget)"
-    [ -n "$current_reset" ] && line2+=" ${C_MUTED}${current_reset}${R}"
-    line2+="${sep}${C_MUTED}7d:${R} $(bgauge "$weekly_pct" 6 budget) $(cpct $weekly_pct budget)"
-    [ -n "$weekly_reset_full" ] && line2+=" ${C_MUTED}${weekly_reset_full}${R}"
-    if [ "$extra_enabled" = "true" ]; then
-      line2+="${sep}${C_MUTED}extra${R} $(bgauge "$extra_pct" 6 budget) ${C_MUTED}${extra_remaining} left${R}"
-    fi
-  else
-    line2="${C_MUTED}cost:${R} ${C_AMBER}${session_cost_fmt}${R}"
-  fi
-  line2+="$acct_sfx"
-  printf '%b\n%b' "$line1" "$line2"
+# Dynamic XWIDE threshold: only show gauge bar when full content actually fits.
+# Visible chars: path + "  " + branch + [diffs] + " | " + model + " | ctx: " + 8-gauge + " XX%" + usage + acct
+_xwide_min=$((${#project_dir_display} + 2 + ${#git_branch} + 3 + ${#model_full} + 9 + 8 + 4 + _xwide_usage_vis))
+[ -n "$diff_str" ] && _xwide_min=$((_xwide_min + ${#diff_str} + 3))
+[ -n "$_email_short" ] && _xwide_min=$((_xwide_min + 3 + ${#_email_short} + 1 + ${#account_plan}))
 
-elif [ "$avail" -ge 88 ] && [ "$avail" -ge "$model_line_vis" ]; then
-  # WIDE: line 1 = project + branch + model + ctx%
-  #       line 2 = usage gauges + resets
-  line1="${C_RED}${project_name}${R}"
-  [ -n "$git_branch" ] && line1+="  ${C_GREEN}${git_branch}${R}"
-  [ -n "$diff_str" ] && line1+=" ${C_AMBER}[${diff_str}]${R}"
-  line1+="${sep}${C_PURPLE}${model_short}${R}"
-  line1+="${sep}${C_MUTED}ctx:${R} $(cpct $ctx_pct context)"
-  if $is_subscription_plan; then
-    line2="${C_MUTED}5h:${R} $(bgauge "$current_pct" 6 budget) $(cpct $current_pct budget)"
-    [ -n "$current_reset" ] && line2+=" ${C_MUTED}${current_reset}${R}"
-    line2+="${sep}${C_MUTED}7d:${R} $(bgauge "$weekly_pct" 6 budget) $(cpct $weekly_pct budget)"
-    [ -n "$weekly_reset" ] && line2+=" ${C_MUTED}${weekly_reset}${R}"
-    if [ "$extra_enabled" = "true" ]; then
-      line2+="${sep}${C_MUTED}ext:${R} $(bgauge "$extra_pct" 6 budget) ${C_MUTED}${extra_remaining} left${R}"
-    fi
-  else
-    line2="${C_MUTED}cost:${R} ${C_AMBER}${session_cost_fmt}${R}"
-  fi
-  line2+="$acct_sfx"
-  printf '%b\n%b' "$line1" "$line2"
-
-elif [ "$avail" -ge 56 ]; then
-  # COMPACT: line 1 = short project + branch + model_tiny + ctx gauge
-  #          line 2 = c% + w% with gauges
-  line1="${C_RED}${project_short}${R}"
-  [ -n "$git_branch" ] && line1+="  ${C_GREEN}${git_branch}${R}"
-  line1+="${sep}${C_PURPLE}${model_short}${R}"
-  line1+="${sep}${C_MUTED}ctx:${R} $(bgauge "$ctx_pct" 8 context) $(cpct $ctx_pct context)"
-  if $is_subscription_plan; then
-    line2="${C_MUTED}5h:${R} $(bgauge "$current_pct" 6 budget) $(cpct $current_pct budget)"
-    [ -n "$current_reset" ] && line2+=" ${C_MUTED}${current_reset}${R}"
-    line2+="${sep}${C_MUTED}7d:${R} $(bgauge "$weekly_pct" 6 budget) $(cpct $weekly_pct budget)"
-    if [ "$extra_enabled" = "true" ]; then
-      line2+="${sep}${C_MUTED}ext:${R} $(bgauge "$extra_pct" 6 budget) ${C_MUTED}${extra_remaining} left${R}"
-    fi
-  else
-    line2="${C_MUTED}cost:${R} ${C_AMBER}${session_cost_fmt}${R}"
-  fi
-  line2+="$acct_sfx"
-  printf '%b\n%b' "$line1" "$line2"
-
-elif [ "$avail" -ge 36 ]; then
-  # NARROW: 1 line, short project + model_tiny + percentages
-  line="${C_RED}${project_short}${R}"
+if [ "$avail" -ge "$_xwide_min" ]; then
+  # XWIDE: full path + full model + ctx gauge + usage gauges
+  line="${C_RED}${project_dir_display}${R}"
   [ -n "$git_branch" ] && line+="  ${C_GREEN}${git_branch}${R}"
+  [ -n "$diff_str" ] && line+=" ${C_AMBER}[${diff_str}]${R}"
+  line+="${sep}${C_PURPLE}${model_full}${R}"
+  line+="${sep}${C_MUTED}ctx:${R} $(bgauge "$ctx_pct" 8 context) $(cpct $ctx_pct context)"
+  line+="$usage_gauges"
+  line+="$acct_sfx"
+
+elif [ "$avail" -ge 72 ]; then
+  # WIDE: full path + model_short + ctx% + usage%
+  line="${C_RED}${project_dir_display}${R}"
+  [ -n "$git_branch" ] && line+="  ${C_GREEN}${git_branch}${R}"
+  [ -n "$diff_str" ] && line+=" ${C_AMBER}[${diff_str}]${R}"
   line+="${sep}${C_PURPLE}${model_short}${R}"
   line+="${sep}${C_MUTED}ctx:${R} $(cpct $ctx_pct context)"
-  if $is_subscription_plan; then
-    line+="${sep}${C_MUTED}5h:${R} $(cpct $current_pct budget)"
-    line+="${sep}${C_MUTED}7d:${R} $(cpct $weekly_pct budget)"
-  else
-    line+="${sep}${C_AMBER}${session_cost_fmt}${R}"
-  fi
+  line+="$usage_pct"
   line+="$acct_sfx"
-  printf '%b' "$line"
+
+elif [ "$avail" -ge 52 ]; then
+  # MEDIUM: project_name + model_short + ctx% + usage%
+  line="${C_RED}${project_name}${R}"
+  [ -n "$git_branch" ] && line+="  ${C_GREEN}${git_branch}${R}"
+  [ -n "$diff_str" ] && line+=" ${C_AMBER}[${diff_str}]${R}"
+  line+="${sep}${C_PURPLE}${model_short}${R}"
+  line+="${sep}${C_MUTED}ctx:${R} $(cpct $ctx_pct context)"
+  line+="$usage_pct"
+  line+="$acct_sfx"
+
+elif [ "$avail" -ge 36 ]; then
+  # COMPACT: project_name + branch + ctx% + usage%
+  line="${C_RED}${project_name}${R}"
+  [ -n "$git_branch" ] && line+="  ${C_GREEN}${git_branch}${R}"
+  line+="${sep}${C_MUTED}ctx:${R} $(cpct $ctx_pct context)"
+  line+="$usage_pct"
+
+elif [ "$avail" -ge 20 ]; then
+  # NARROW: project_short + branch + ctx%
+  line="${C_RED}${project_short}${R}"
+  [ -n "$git_branch" ] && line+="  ${C_GREEN}${git_branch}${R}"
+  line+="${sep}${C_MUTED}ctx:${R} $(cpct $ctx_pct context)"
 
 else
-  # ULTRACOMPACT: branch + model_tiny + percentages, no dividers
-  line=""
-  [ -n "$git_branch" ] && line+="${C_GREEN}${git_branch}${R}" || line+="${C_RED}${project_short}${R}"
-  line+=" ${C_PURPLE}${model_word}${R}"
+  # ULTRA: branch + ctx%
+  [ -n "$git_branch" ] && line="${C_GREEN}${git_branch}${R}" || line="${C_RED}${project_short}${R}"
   line+=" ${C_MUTED}ctx:${R}$(cpct $ctx_pct context)"
-  if $is_subscription_plan; then
-    line+=" ${C_MUTED}5h:${R}$(cpct $current_pct budget)"
-    line+=" ${C_MUTED}7d:${R}$(cpct $weekly_pct budget)"
-  else
-    line+=" ${C_AMBER}${session_cost_fmt}${R}"
-  fi
-  printf '%b' "$line"
 fi
+
+printf '%b' "$line"
 
 exit 0

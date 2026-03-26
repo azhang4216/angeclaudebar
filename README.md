@@ -1,15 +1,17 @@
 # AngeClaudeBar — Context-Aware Status Line for Claude Code
 
-A rich, plan-aware status line for [Claude Code](https://claude.ai/code) with Catppuccin Macchiato colors.
+A rich, plan-aware status line for [Claude Code](https://claude.ai/code) with Catppuccin Macchiato colors. Adapts to your terminal width and billing plan — shows visual gauges on wide screens, drops to compact percentages as space shrinks.
 
-```
-~/repos/my-project  main [2M]  |  Claude Sonnet-4.6  |  ctx:  ▓▓▓▒▒▒▒▒▒▒  14%
-5h:  ▓▓▓▓▒▒▒▒▒▒  42%  3:45pm  |  7d:  ▓▒▒▒▒▒▒▒▒▒  18%  Fri 3/28  |  you@example.com Pro
-```
+![AngeClaudeBar preview](preview.svg)
 
 ## Install
 
 **1. Download the script**
+
+> **Note:** If you already have a `~/.claude/statusline.sh`, back it up first — this command will overwrite it.
+> ```bash
+> cp ~/.claude/statusline.sh ~/.claude/statusline.sh.bak
+> ```
 
 ```bash
 curl -o ~/.claude/statusline.sh \
