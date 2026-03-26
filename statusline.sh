@@ -25,6 +25,8 @@ fi
 project_dir=$(echo "$input" | jq -r '.workspace.project_dir // .workspace.current_dir // empty')
 [ -z "$project_dir" ] || [ "$project_dir" = "null" ] && project_dir=$(echo "$input" | jq -r '.cwd // empty')
 project_name=$(basename "${project_dir:-Claude}")
+# Home-relative full path for wide displays (e.g. ~/repos/myproject)
+project_dir_display="${project_dir/$HOME/~}"
 # Short version for narrow tiers
 if [ ${#project_name} -gt 12 ]; then
   project_short="${project_name:0:10}.."
@@ -467,14 +469,14 @@ fi
 # Precompute widths for tier selection
 # WIDE uses short model name (Op 4.6 (1M))
 model_line_vis=$((${#project_name} + 2 + ${#git_branch} + 3 + ${#model_name} + 3 + 3 + 3 + 5 + 3 + 4))
-# FULL uses full model name (Opus 4.6 (1M)) + gauge
-full_model_vis=$((${#project_name} + 2 + ${#git_branch} + 3 + ${#model_full} + 3 + 10 + 1 + 4))
+# FULL uses full path + full model name + gauge
+full_model_vis=$((${#project_dir_display} + 2 + ${#git_branch} + 3 + ${#model_full} + 3 + 10 + 1 + 4))
 full_line_vis=$full_model_vis
 
 if [ "$avail" -ge 88 ] && [ "$avail" -ge "$full_line_vis" ]; then
-  # FULL: line 1 = project + branch + diffs + model + ctx gauge
+  # FULL: line 1 = full dir path + branch + diffs + model + ctx gauge
   #       line 2 = c gauge + reset | w gauge + reset | ext
-  line1="${C_RED}${project_name}${R}"
+  line1="${C_RED}${project_dir_display}${R}"
   [ -n "$git_branch" ] && line1+="  ${C_GREEN}${git_branch}${R}"
   [ -n "$diff_str" ] && line1+=" ${C_AMBER}[${diff_str}]${R}"
   line1+="${sep}${C_PURPLE}${model_full}${R}"

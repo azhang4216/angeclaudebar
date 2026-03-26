@@ -1,47 +1,10 @@
-# Claude Code Status Line
+# AngeClaudeBar — Context-Aware Status Line for Claude Code
 
 A rich, plan-aware status line for [Claude Code](https://claude.ai/code) with Catppuccin Macchiato colors.
 
 ```
-ai-tooling  main [2M]  |  Claude Sonnet-4.6  |  ctx:  ▓▓▓▒▒▒▒▒▒▒  14%
+~/repos/my-project  main [2M]  |  Claude Sonnet-4.6  |  ctx:  ▓▓▓▒▒▒▒▒▒▒  14%
 5h:  ▓▓▓▓▒▒▒▒▒▒  42%  3:45pm  |  7d:  ▓▒▒▒▒▒▒▒▒▒  18%  Fri 3/28  |  you@example.com Pro
-```
-
-## What it shows
-
-**All plans**
-- Project name and git branch with uncommitted change counts (`2M`, `1A`, `1D`)
-- Model name (e.g. `Sonnet-4.6`, `Opus-4.6`)
-- Context window usage with a color-coded gauge
-
-**Subscription plans (Pro / Max)**
-- 5-hour rolling usage gauge with reset time
-- 7-day rolling usage gauge with reset time
-- Extra usage budget (if enabled on Max)
-
-**API key plans**
-- Session cost in dollars (e.g. `$0.34`) instead of rate-limit windows
-
-**Always**
-- Account username and plan label at the far right
-
-The layout adapts to your terminal width — from a full two-line display down to a compact single line.
-
-## Requirements
-
-- [Claude Code](https://claude.ai/code) with OAuth login (the standard `claude login` flow)
-- [`jq`](https://jqlang.github.io/jq/) — JSON processor
-- `curl`, `bash` — standard on macOS and Linux
-- A terminal with truecolor support for the best experience
-
-Install `jq` on macOS:
-```bash
-brew install jq
-```
-
-On Ubuntu/Debian:
-```bash
-sudo apt install jq
 ```
 
 ## Install
@@ -50,13 +13,13 @@ sudo apt install jq
 
 ```bash
 curl -o ~/.claude/statusline.sh \
-  https://raw.githubusercontent.com/azhang4216/claude-statusline/main/statusline.sh
+  https://raw.githubusercontent.com/azhang4216/angeclaudebar/main/statusline.sh
 chmod +x ~/.claude/statusline.sh
 ```
 
 Or clone and symlink:
 ```bash
-git clone https://github.com/azhang4216/claude-statusline.git ~/repos/claude-statusline
+git clone https://github.com/azhang4216/angeclaudebar.git ~/repos/claude-statusline
 ln -s ~/repos/claude-statusline/statusline.sh ~/.claude/statusline.sh
 ```
 
@@ -75,9 +38,67 @@ Add this to `~/.claude/settings.json`:
 
 If you already have a `settings.json`, merge the `statusLine` key into your existing object.
 
-**3. Restart Claude Code**
+**3. (Optional) Keep it fresh on every session**
+
+Add a `SessionStart` hook to clear the cache so your login info is always up to date:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rm -f /tmp/claude/statusline-profile-cache.json /tmp/claude/statusline-usage-cache.json"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**4. Restart Claude Code**
 
 The status line appears at the bottom of each session.
+
+## What it shows
+
+**All plans**
+- Full project path and git branch with uncommitted change counts (`2M`, `1A`, `1D`)
+- Model name (e.g. `Sonnet-4.6`, `Opus-4.6`)
+- Context window usage with a color-coded gauge
+
+**Subscription plans (Pro / Max)**
+- 5-hour rolling usage gauge with reset time
+- 7-day rolling usage gauge with reset time
+- Extra usage budget (if enabled on Max)
+
+**API key plans**
+- Session cost in dollars (e.g. `$0.34`) instead of rate-limit windows
+
+**Always**
+- Account username and plan label at the far right
+
+The layout adapts to your terminal width — from a full two-line display (with full directory path) down to a compact single line.
+
+## Requirements
+
+- [Claude Code](https://claude.ai/code) with OAuth login (the standard `claude login` flow)
+- [`jq`](https://jqlang.github.io/jq/) — JSON processor
+- `curl`, `bash` — standard on macOS and Linux
+- A terminal with truecolor support for the best experience
+
+Install `jq` on macOS:
+```bash
+brew install jq
+```
+
+On Ubuntu/Debian:
+```bash
+sudo apt install jq
+```
 
 ## How it works
 
@@ -97,7 +118,7 @@ Uses the [Catppuccin Macchiato](https://github.com/catppuccin/catppuccin) palett
 
 | Element | Color |
 |---|---|
-| Project name | Red `#ed8796` |
+| Project path | Red `#ed8796` |
 | Git branch | Green `#a6da95` |
 | Model | Purple `#c6a0f6` |
 | Healthy gauge | Teal `#8bd5ca` |
